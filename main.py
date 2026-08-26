@@ -3,13 +3,16 @@ import json
 import time
 import urllib.request
 import urllib.parse
+import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
 # ================= CONFIGURATION =================
 MASTER_SOLANA_WALLET = "3PURyRLcckKJm4NYKoChomR1qLQDg1M49NmC37QZtiw8"
 SOLANA_RPC = "https://api.mainnet-beta.solana.com"
-ROUTER_PORT = 8080
+
+# Railway dynamic port Support
+ROUTER_PORT = int(os.environ.get("PORT", 8080))
 SWARM_WORKER_COUNT = 15
 
 # Cloud Provider Config (For Auto-Cloning)
@@ -141,6 +144,20 @@ class PaywallRouterHandler(BaseHTTPRequestHandler):
             "/v1/arbitrage-scan": ("arbitrage-scan", 0.003),
             "/v1/trend-scraper": ("trend-scraper", 0.002)
         }
+
+        # ROOT ROUTE (Fixes 404 Error on Railway)
+        if self.path == "/" or self.path == "":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            status_res = {
+                "status": "ONLINE",
+                "message": "Solana Swarm Agent is Live!",
+                "active_nodes": CURRENT_ACTIVE_NODES,
+                "available_endpoints": list(routes.keys())
+            }
+            self.wfile.write(json.dumps(status_res).encode())
+            return
 
         if self.path in routes:
             service_name, price = routes[self.path]
