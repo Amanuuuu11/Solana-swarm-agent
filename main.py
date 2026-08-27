@@ -379,6 +379,7 @@ async def autonomous_suggestion_loop():
     applies ONLY what you approve. Nothing here acts without your reply."""
     while True:
         await asyncio.sleep(SUGGESTION_INTERVAL_SECONDS)
+        print(f"🔄 Suggestion loop triggered, interval was {SUGGESTION_INTERVAL_SECONDS}s")
         try:
             suggestion = await generate_one_suggestion()
             if not suggestion:
