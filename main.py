@@ -370,7 +370,8 @@ async def generate_one_suggestion() -> dict:
         if parsed.get("type") not in ALLOWED_SUGGESTION_TYPES:
             return None
         return parsed
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ Failed to parse AI suggestion. Raw response: {raw[:200]} | Error: {e}")
         return None
 
 async def autonomous_suggestion_loop():
