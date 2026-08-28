@@ -357,46 +357,26 @@ async def generate_one_suggestion() -> dict:
         f"web scraping, Solana DEX price data). Current usage stats: {json.dumps(stats)}. "
         f"Suggest exactly ONE concrete improvement, choosing a type from this fixed list only: "
         f"{ALLOWED_SUGGESTION_TYPES}. "
-        f"Reply ONLY with valid JSON in this exact shape, no markdown fences, no extra text: "
+        f"Reply ONLY with JSON in this exact shape: "
         f'{{"type": "<one of the allowed types>", "reasoning": "<1-2 sentences>", '
         f'"details": "<the actual suggestion text>", "proposed_multiplier": <number, only if type is pricing_change, else null>}}'
     )
     raw = await loop.run_in_executor(None, execute_groq_ai_task, "ask-ai", prompt)
-    
     try:
-        # Check if raw response is a fallback string or not a string
-        if not isinstance(raw, str) or "Fallback Response" in raw or "Error" in raw:
-            print(f"⚠️ generate_one_suggestion: Groq execution engine returned fallback/error: {str(raw)[:200]}")
+        # Groq sometimes wraps JSON in markdown fences or adds stray text around it.
+        # Extract the first {...} block instead of assuming the whole string is clean JSON.
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            print(f"⚠️ generate_one_suggestion: no JSON object found in AI response: {raw[:300]}")
             return None
-
-        # Clean markdown if present
-        cleaned_raw = raw.strip()
-        if cleaned_raw.startswith("```json"):
-            cleaned_raw = cleaned_raw[7:]
-        elif cleaned_raw.startswith("```"):
-            cleaned_raw = cleaned_raw[3:]
-        if cleaned_raw.endswith("```"):
-            cleaned_raw = cleaned_raw[:-3]
-        cleaned_raw = cleaned_raw.strip()
-
-        # Find JSON braces
-        start = cleaned_raw.find("{")
-        end = cleaned_raw.rfind("}")
-        
-        if start != -1 and end != -1 and end > start:
-            json_str = cleaned_raw[start:end+1]
-            parsed = json.loads(json_str)
-        else:
-            print(f"⚠️ generate_one_suggestion: no valid JSON braces found in raw response: {str(raw)[:300]}")
+        cleaned = match.group(0)
+        parsed = json.loads(cleaned)
+        if parsed.get("type") not in ALLOWED_SUGGESTION_TYPES:
+            print(f"⚠️ generate_one_suggestion: AI returned invalid type: {parsed.get('type')}")
             return None
-
-        if not isinstance(parsed, dict) or parsed.get("type") not in ALLOWED_SUGGESTION_TYPES:
-            print(f"⚠️ generate_one_suggestion: AI returned invalid type or non-dict: {parsed}")
-            return None
-            
         return parsed
     except Exception as e:
-        print(f"⚠️ generate_one_suggestion: failed to parse AI response ({e}). Raw: {str(raw)[:300]}")
+        print(f"⚠️ generate_one_suggestion: failed to parse AI response ({e}). Raw: {raw[:300]}")
         return None
 
 async def autonomous_suggestion_loop():
@@ -903,3 +883,4 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
