@@ -363,15 +363,20 @@ async def generate_one_suggestion() -> dict:
     )
     raw = await loop.run_in_executor(None, execute_groq_ai_task, "ask-ai", prompt)
     try:
-        cleaned = raw.strip().strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:].strip()
+        # Groq sometimes wraps JSON in markdown fences or adds stray text around it.
+        # Extract the first {...} block instead of assuming the whole string is clean JSON.
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            print(f"⚠️ generate_one_suggestion: no JSON object found in AI response: {raw[:300]}")
+            return None
+        cleaned = match.group(0)
         parsed = json.loads(cleaned)
         if parsed.get("type") not in ALLOWED_SUGGESTION_TYPES:
+            print(f"⚠️ generate_one_suggestion: AI returned invalid type: {parsed.get('type')}")
             return None
         return parsed
     except Exception as e:
-        print(f"⚠️ Failed to parse AI suggestion. Raw response: {raw[:200]} | Error: {e}")
+        print(f"⚠️ generate_one_suggestion: failed to parse AI response ({e}). Raw: {raw[:300]}")
         return None
 
 async def autonomous_suggestion_loop():
@@ -380,10 +385,11 @@ async def autonomous_suggestion_loop():
     applies ONLY what you approve. Nothing here acts without your reply."""
     while True:
         await asyncio.sleep(SUGGESTION_INTERVAL_SECONDS)
-        print(f"🔄 Suggestion loop triggered, interval was {SUGGESTION_INTERVAL_SECONDS}s")
+        print(f"🔄 suggestion_loop tick: generating a new suggestion...")
         try:
             suggestion = await generate_one_suggestion()
             if not suggestion:
+                print("⚠️ suggestion_loop: generate_one_suggestion returned None this cycle, skipping.")
                 continue
             pending = _load_pending_suggestions()
             suggestion_id = len(pending) + 1
