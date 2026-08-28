@@ -363,12 +363,24 @@ async def generate_one_suggestion() -> dict:
     )
     raw = await loop.run_in_executor(None, execute_groq_ai_task, "ask-ai", prompt)
     try:
-        # Groq sometimes wraps JSON in markdown fences or adds stray text around it.
-        # Extract the first {...} block instead of assuming the whole string is clean JSON.
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not match:
-            print(f"⚠️ generate_one_suggestion: no JSON object found in AI response: {raw[:300]}")
+        try:
+            parsed = json.loads(raw.strip())
+        except json.JSONDecodeError:
+            match = re.search(r"\{", raw)
+            if not match:
+                print(f"⚠️ generate_one_suggestion: no JSON object found in AI response: {raw[:300]}")
+                return None
+            
+            json_start_idx = match.start()
+            parsed, idx = json.JSONDecoder().raw_decode(raw, json_start_idx)
+
+        if parsed.get("type") not in ALLOWED_SUGGESTION_TYPES:
+            print(f"⚠️ generate_one_suggestion: AI returned invalid type: {parsed.get('type')}")
             return None
+        return parsed
+    except Exception as e:
+        print(f"⚠️ generate_one_suggestion: failed to parse AI response ({e}). Raw: {raw[:300]}")
+        return None
         cleaned = match.group(0)
         parsed = json.loads(cleaned)
         if parsed.get("type") not in ALLOWED_SUGGESTION_TYPES:
