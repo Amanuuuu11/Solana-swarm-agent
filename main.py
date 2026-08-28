@@ -3,6 +3,7 @@ import json
 import time
 import urllib.request
 import urllib.parse
+import urllib.error
 import os
 import re
 import threading
@@ -484,7 +485,21 @@ def scrape_real_website(target_url):
         return {"status": "ERROR", "reason": f"Scraping Failed: {str(e)}"}
 
 def execute_groq_ai_task(prompt_type, input_text):
-    """Executes Real LLM Calls using Groq API"""
+    """Executes Real LLM Calls using Groq API.
+
+    FIX: previously, any failure (bad key, bad model name, rate limit, timeout,
+    etc.) was silently folded into one long fallback string that included the
+    entire original prompt. On Railway (and most log viewers) long single-line
+    log entries get truncated at a few hundred characters, so the actual
+    "(Error: ...)" reason was always the part getting cut off — making every
+    failure look identical and undiagnosable from the logs.
+
+    Now: the real error is printed on its OWN short line (well under any
+    truncation limit) via print(), separate from the long prompt text. HTTP
+    errors from Groq's API (401 bad key, 429 rate limit/quota, 404 bad model,
+    etc.) are handled separately so the status code and server-provided reason
+    are visible directly in the logs.
+    """
     if not GROQ_API_KEY:
         return "GROQ API Key Missing! Set the GROQ_API_KEY environment variable."
 
@@ -513,8 +528,23 @@ def execute_groq_ai_task(prompt_type, input_text):
         with urllib.request.urlopen(req, timeout=8) as resp:
             res_data = json.loads(resp.read().decode('utf-8'))
             return res_data['choices'][0]['message']['content']
+    except urllib.error.HTTPError as e:
+        # HTTPError carries the real reason from Groq's server (bad key, bad
+        # model, quota exceeded, etc). Print it FIRST, on its own short line,
+        # so it survives log truncation regardless of how long the prompt was.
+        body = ""
+        try:
+            body = e.read().decode('utf-8', errors='ignore')[:300]
+        except Exception:
+            pass
+        print(f"❌ GROQ HTTP ERROR: status={e.code} reason={e.reason} body={body}")
+        return f"Groq Execution Engine Fallback Response (HTTP {e.code})"
+    except urllib.error.URLError as e:
+        print(f"❌ GROQ NETWORK ERROR: {e.reason}")
+        return "Groq Execution Engine Fallback Response (network error)"
     except Exception as e:
-        return f"Groq Execution Engine Fallback Response for: {input_text} (Error: {str(e)})"
+        print(f"❌ GROQ ERROR: {type(e).__name__}: {str(e)[:200]}")
+        return f"Groq Execution Engine Fallback Response ({type(e).__name__})"
 
 # ================= 2. WORKER AGENT & TASK EXECUTOR =================
 
@@ -883,4 +913,3 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-
