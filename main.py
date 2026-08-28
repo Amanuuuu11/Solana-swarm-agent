@@ -357,19 +357,40 @@ async def generate_one_suggestion() -> dict:
         f"web scraping, Solana DEX price data). Current usage stats: {json.dumps(stats)}. "
         f"Suggest exactly ONE concrete improvement, choosing a type from this fixed list only: "
         f"{ALLOWED_SUGGESTION_TYPES}. "
-        f"Reply ONLY with JSON in this exact shape: "
+        f"Reply ONLY with valid JSON in this exact shape, no markdown fences, no extra text: "
         f'{{"type": "<one of the allowed types>", "reasoning": "<1-2 sentences>", '
         f'"details": "<the actual suggestion text>", "proposed_multiplier": <number, only if type is pricing_change, else null>}}'
     )
     raw = await loop.run_in_executor(None, execute_groq_ai_task, "ask-ai", prompt)
     try:
-        try:
-            parsed = json.loads(raw.strip())
-        except json.JSONDecodeError:
-            match = re.search(r"\{", raw)
-            if not match:
-                print(f"⚠️ generate_one_suggestion: no JSON object found in AI response: {raw[:300]}")
-                return None
+        # Clean markdown code blocks if Groq added them
+        cleaned_raw = raw.strip()
+        if cleaned_raw.startswith("```json"):
+            cleaned_raw = cleaned_raw[7:]
+        elif cleaned_raw.startswith("```"):
+            cleaned_raw = cleaned_raw[3:]
+        if cleaned_raw.endswith("```"):
+            cleaned_raw = cleaned_raw[:-3]
+        cleaned_raw = cleaned_raw.strip()
+
+        # Find the first opening brace and last closing brace
+        start = cleaned_raw.find("{")
+        end = cleaned_raw.rfind("}")
+        
+        if start != -1 and end != -1 and end > start:
+            json_str = cleaned_raw[start:end+1]
+            parsed = json.loads(json_str)
+        else:
+            print(f"⚠️ generate_one_suggestion: no valid JSON braces found in raw response: {raw[:300]}")
+            return None
+
+        if parsed.get("type") not in ALLOWED_SUGGESTION_TYPES:
+            print(f"⚠️ generate_one_suggestion: AI returned invalid type: {parsed.get('type')}")
+            return None
+        return parsed
+    except Exception as e:
+        print(f"⚠️ generate_one_suggestion: failed to parse AI response ({e}). Raw: {raw[:300]}")
+        return None
             
             json_start_idx = match.start()
             parsed, idx = json.JSONDecoder().raw_decode(raw, json_start_idx)
